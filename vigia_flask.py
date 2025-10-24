@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime
+from flask import Flask, render_template, jsonify
 
 # --- Bloco 2: Configurações ---
 GLPI_URL_BASE = 'https://chamados.slmandic.edu.br/glpi'
