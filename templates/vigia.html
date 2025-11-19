@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    <title>Monitoramento Infra</title>
+    <style>
+        body { padding: 30px; background-color: #f0f2f5; }
+        .card { margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header-n1 { background-color: #0d6efd; color: white; }
+        .header-n2 { background-color: #ffc107; color: black; }
+        .header-n3 { background-color: #dc3545; color: white; }
+        .numero-grande { font-size: 2.5rem; font-weight: bold; margin-bottom: 0; }
+        .tempo-antigo { font-size: 1rem; font-weight: bold; margin-top: 5px; }
+    </style>
+    <meta http-equiv="refresh" content="300"> 
+</head>
+<body>
+    <div class="container">
+        <h2 class="text-center mb-4">Painel de Filas - Infraestrutura</h2>
+        <p class="text-center text-muted">Última atualização: {{ agora }}</p>
+
+        {% if erro_msg %}
+            <div class="alert alert-danger text-center">{{ erro_msg }}</div>
+        {% elif dados %}
+        
+        <div class="row text-center">
+            
+            {% macro card_nivel(titulo, classe_header, info) %}
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header {{ classe_header }}">{{ titulo }}</div>
+                    <div class="card-body">
+                        <p class="numero-grande">{{ info.total }}</p>
+                        <small class="text-muted">Chamados</small>
+                        <hr>
+                        <small>Mais antigo na fila:</small>
+                        <p class="tempo-antigo 
+                            {% if info.mais_antigo_dias >= 5 %} text-danger 
+                            {% elif info.mais_antigo_dias >= 2 %} text-warning 
+                            {% else %} text-success {% endif %}">
+                            ⏱ {{ info.mais_antigo_tempo }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            {% endmacro %}
+
+            {{ card_nivel('Nível 1', 'header-n1', dados.n1) }}
+            {{ card_nivel('Nível 2', 'header-n2', dados.n2) }}
+            {{ card_nivel('Nível 3', 'header-n3', dados.n3) }}
+            
+        </div>
+
+        <div class="row justify-content-center mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <canvas id="graficoFilas"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <div class="text-center mt-3">
+             <a href="/" class="btn btn-sm btn-secondary">Forçar Atualização</a>
+        </div>
+    </div>
+
+    {% if dados %}
+    <script>
+        const ctx = document.getElementById('graficoFilas').getContext('2d');
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Nível 1', 'Nível 2', 'Nível 3'],
+                datasets: [{
+                    label: 'Total',
+                    data: [{{ dados.n1.total }}, {{ dados.n2.total }}, {{ dados.n3.total }}],
+                    backgroundColor: ['#0d6efd', '#ffc107', '#dc3545']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

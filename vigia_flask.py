@@ -1,131 +1,188 @@
-#
 import requests
+import webbrowser
+from threading import Timer
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template
+import configparser
 
-# --- Bloco 2: Configurações ---
-GLPI_URL_BASE = 'https://chamados.slmandic.edu.br/glpi'
-LOGIN_URL = 'https://chamados.slmandic.edu.br/glpi/index.php?noAUTO=1'
+# --- Bloco 2: Configurações ATUALIZADO ---
+# --- PREENCHA SUAS INFORMAÇÕES AQUI ---
+GLPI_URL_BASE = 'https://chamados.slmandic.edu.br'
+URL_FORMULARIO_LOGIN = f'{GLPI_URL_BASE}/glpi/index.php?noAUTO=1'
+URL_POST_LOGIN = f'{GLPI_URL_BASE}/glpi/front/login.php' 
+GLPI_USER= ""
+GLPI_PASSWORD = ""
+
+config= configparser.ConfigParser()
+config.read('config.ini')
+
+try:
+    GLPI_USER = config['GLPI']['USUARIO']
+    GLPI_PASSWORD = config['GLPI']['SENHA']
+except KeyError:
+    print("Erro: Arquivo 'config.ini' não encontrado ou incompleto.")
+    print("Verifique se 'config.ini' existe e tem as seções [GLPI], USUARIO e SENHA.")
 
 
-GLPI_USER = "01992005"
-GLPI_PASSWORD = "Maequeridas2!"
+# --- NOSSAS 3 URLs DE ALVO (sem o _glpi_csrf_token) ---
 
-PAGINA_ALVO_URL = """https://chamados.slmandic.edu.br/glpi/front/ticket.php?is_deleted=0&as_map=0&search=Pesquisar&itemtype=Ticket&savedsearches_id=613&reset=reset&criteria%5B0%5D%5Blink%5D=AND&criteria%5B0%5D%5Bfield%5D=12&criteria%5B0%5D%5Bsearchtype%5D=equals&criteria%5B0%5D%5Bvalue%5D=1&criteria%5B1%5D%5Blink%5D=OR&criteria%5B1%5D%5Bfield%5D=12&criteria%5B1%5D%5Bsearchtype%5D=equals&criteria%5B1%5D%5Bvalue%5D=4&criteria%5B2%5D%5Blink%5D=AND&criteria%5B2%5D%5Bfield%5D=5&criteria%5B2%5D%5Bsearchtype%5D=equals&criteria%5B2%5D%5Bvalue%5D=0&criteria%5B3%5D%5Blink%5D=AND&criteria%5B3%5D%5Bfield%5D=8&criteria%5B3%5D%5Bsearchtype%5D=equals&criteria%5B3%5D%5Bvalue%5D=0"""
+# 1. A sua URL original (Pesquisa Salva 613) que mostra o TOTAL
+URL_N1 = """https://chamados.slmandic.edu.br/glpi/front/ticket.php?is_deleted=0&as_map=0&criteria%5B0%5D%5Blink%5D=AND&criteria%5B0%5D%5Bfield%5D=12&criteria%5B0%5D%5Bsearchtype%5D=equals&criteria%5B0%5D%5Bvalue%5D=notold&criteria%5B1%5D%5Blink%5D=AND&criteria%5B1%5D%5Bfield%5D=8&criteria%5B1%5D%5Bsearchtype%5D=equals&criteria%5B1%5D%5Bvalue%5D=74&search=Pesquisar&itemtype=Ticket&start=0"""
+# 2. A URL "Vigia - Novo" (Status=1)
+URL_N2 = """https://chamados.slmandic.edu.br/glpi/front/ticket.php?is_deleted=0&as_map=0&search=Pesquisar&itemtype=Ticket&savedsearches_id=765&criteria%5B0%5D%5Blink%5D=AND&criteria%5B0%5D%5Bfield%5D=12&criteria%5B0%5D%5Bsearchtype%5D=equals&criteria%5B0%5D%5Bvalue%5D=notold&criteria%5B1%5D%5Blink%5D=AND&criteria%5B1%5D%5Bfield%5D=8&criteria%5B1%5D%5Bsearchtype%5D=equals&criteria%5B1%5D%5Bvalue%5D=75&criteria%5B2%5D%5Blink%5D=AND&criteria%5B2%5D%5Bfield%5D=6&criteria%5B2%5D%5Bsearchtype%5D=equals&criteria%5B2%5D%5Bvalue%5D=0&reset=reset"""
 
-# Funçoes, desde login e buscar dados
+# 3. A URL "Vigia - Pendente" (Status=4)
+URL_N3 = """https://chamados.slmandic.edu.br/glpi/front/ticket.php?is_deleted=0&as_map=0&search=Pesquisar&itemtype=Ticket&savedsearches_id=778&criteria%5B0%5D%5Blink%5D=AND&criteria%5B0%5D%5Bfield%5D=12&criteria%5B0%5D%5Bsearchtype%5D=equals&criteria%5B0%5D%5Bvalue%5D=notold&criteria%5B1%5D%5Blink%5D=AND&criteria%5B1%5D%5Bfield%5D=8&criteria%5B1%5D%5Bsearchtype%5D=equals&criteria%5B1%5D%5Bvalue%5D=76&criteria%5B2%5D%5Blink%5D=AND&criteria%5B2%5D%5Bfield%5D=6&criteria%5B2%5D%5Bsearchtype%5D=equals&criteria%5B2%5D%5Bvalue%5D=0&reset=reset"""
 
+INDICE_COLUNA_DATA = 9
 def fazer_login(session):
-    """
-    Faz o login em duas etapas: 
-    1. Visita a página para pegar os nomes dinâmicos dos campos e o token.
-    2. Envia o formulário de login com todos os dados corretos.
-    """
-    print("Iniciando missão: Fazer Login (com coleta de campos dinâmicos)...")
+        
+        print("Iniciando missão: Fazer Login...")
+        try:
+             resposta_get = session.get(URL_FORMULARIO_LOGIN, timeout=10)
+             soup= BeautifulSoup(resposta_get.text, 'html.parser')
+
+             campo_usuario = soup.find('input', {'id': 'login_name'})
+             nome_campo_usuario = campo_usuario['name'] if campo_usuario else 'login_name'
+             campo_senha = soup.find('input', {'id': 'login_password'})
+             nome_campo_senha = campo_senha['name'] if campo_senha else 'login_password'
+             token_input = soup.find('input', {'name': '_glpi_csrf_token'})
+             csrf_token = token_input['value'] if token_input else None
+
+             payload = {
+                  nome_campo_usuario: GLPI_USER,
+                  nome_campo_senha: GLPI_PASSWORD,
+                  '_glpi_csrf_token': csrf_token,
+                  'submit': 'Enviar',
+                  'noAUTO': '1'
+             }
+
+             resposta_post = session.post(URL_POST_LOGIN, data=payload, timeout=10)
+
+             if "Sair" in resposta_post.text:
+                  print("Sucesso! Login realizado.")
+                  return True
+             else:
+                  print("Falha no login.")
+                  return False
+        except Exception as e:
+             print(f"Erro no login: {e}")
+             return False
+        
+def calcular_tempo_aberto(texto_data):
+     
+     try:
+          data_chamado = datetime.strptime(texto_data.strip(), "%d-%m-%Y %H:%M")
+          agora = datetime.now()
+          diference = agora - data_chamado
+
+          dias = diference.days
+          horas = diference.seconds 
+
+          return f"{dias}d {horas}h", dias
+     except Exception as e:
+          print(f"- Erro ao calcular data para '{texto_data}': {e}...")
+          return "--", 0        
+
+def analisar_fila(session, url, nome_fila):
+    """Busca total e dados do mais antigo."""
+    print(f"  - Analisando fila '{nome_fila}'...")
+    info = {
+        'total': 0, 
+        'mais_antigo_tempo': '--', 
+        'mais_antigo_dias': 0,
+        'tem_chamados': False
+    }
     
     try:
-        print("  - Acessando a página de login para espionar os campos...")
-        # Aqui puxa a URL de login la encima
-        resposta_get = session.get(LOGIN_URL)
-        soup = BeautifulSoup(resposta_get.text, 'html.parser')
-        
-        # Encontra o NOME do campo de usuário procurando pelo seu ID fixo 'login_name'
-        campo_usuario = soup.find('input', {'id': 'login_name'})
-        nome_campo_usuario = campo_usuario['name'] if campo_usuario else 'login_name'
-        
-        # Encontra o NOME do campo de senha procurando pelo seu ID fixo 'login_password'
-        campo_senha = soup.find('input', {'id': 'login_password'})
-        nome_campo_senha = campo_senha['name'] if campo_senha else 'login_password'
-        
-        # Encontra o token CSRF (esta parte já estava funcionando)
-        token_input = soup.find('input', {'name': '_glpi_csrf_token'})
-        csrf_token = token_input['value'] if token_input else None
-        # =========================================================================
-        
-        print(f"  - Campo de usuário dinâmico encontrado: {nome_campo_usuario}")
-        print(f"  - Campo de senha dinâmico encontrado: {nome_campo_senha}")
-        
-        # Agora, ao montar o payload, as variáveis 'nome_campo_usuario' e 'nome_campo_senha' já existem!
-        payload = {
-            nome_campo_usuario: GLPI_USER,
-            nome_campo_senha: GLPI_PASSWORD,
-            '_glpi_csrf_token': csrf_token,
-            'submit': 'Conectar', # Verifique se o valor do seu botão é 'Conectar' ou 'Enviar'
-            'noAUTO': '1'
-        }
-        
-        print("  - Enviando credenciais com os nomes de campo corretos...")
-        # A URL para o POST é a do action do formulário
-        url_post = f"https://chamados.slmandic.edu.br/glpi/front/login.php"
-        resposta_post = session.post(url_post, data=payload)
-        
-        if "Sair" in resposta_post.text:
-            print("Sucesso! Login realizado.")
-            return True
-        else:
-            print("Falha no login. A resposta do servidor não indicou sucesso.")
-
-            #print("--------INICIO DA RESPOSTAS DO SERVIDOR -------")
-            #print(resposta_post.text)
-            #print("--------FIM DA RESPOSTAS DO SERVIDOR -------")
-            return False
-            
-    except Exception as e:
-        print(f"Ocorreu um erro durante o processo de login: {e}")
-        return False
-
-def buscar_dados_da_pagina(session):
-    """Navega até a página alvo (já logado) e extrai a informação desejada."""
-    print("Iniciando missão: Buscar Dados na Página...")
-    try:
-        resposta = session.get(PAGINA_ALVO_URL, timeout=15)
+        resposta = session.get(url, timeout=15)
         soup = BeautifulSoup(resposta.text, 'html.parser')
         
-        # 1. Encontra o elemento <td> com a classe "tab_bg_2 b"
-        elemento = soup.find('td', class_='tab_bg_2 b')
+        # 1. PEGAR O TOTAL (Lógica antiga)
+        elemento_total = soup.find('td', class_='tab_bg_2 b')
+        if elemento_total:
+            texto = elemento_total.text.strip() 
+            total = int(texto.split()[-1])
+            info['total'] = total
+            if total > 0:
+                info['tem_chamados'] = True
         
-        if elemento:
-            # 2. Pega o texto completo. Ex: "De 1 para 7 de 7"
-            texto_completo = elemento.text.strip()
-            print(f"Texto do elemento encontrado: '{texto_completo}'")
+        # 2. PEGAR O MAIS ANTIGO (Nova Lógica)
+        if info['tem_chamados']:
+            # Encontra a tabela principal de tickets (geralmente tem classe 'tab_cadre_fixehov')
+            tabela = soup.find('table', class_='tab_cadre_fixehov')
             
-            # 3. "Quebra" o texto em uma lista de palavras. Ex: ['De', '1', 'para', '7', 'de', '7']
-            palavras = texto_completo.split()
-            
-            # 4. Pega a última palavra da lista, que é o número total. Ex: '7'
-            valor_texto = palavras[-1]
-            
-            print(f"Número total extraído: '{valor_texto}'")
-            # 5. Converte o texto para um número inteiro e o retorna
-            return int(valor_texto)
-        else:
-            print("Elemento com a contagem total não foi encontrado. Verifique a tag e a classe.")
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        print(f"Erro de conexão ao buscar dados: {e}")
-        return None
-    except (IndexError, ValueError) as e:
-        print(f"Erro ao processar o texto do elemento. O formato pode ter mudado. Erro: {e}")
-        return None
+            if tabela:
+                # Pega todas as linhas (tr), ignorando o cabeçalho
+                linhas = tabela.find_all('tr')
+                # A linha 0 geralmente é cabeçalho. Vamos tentar a linha 1 (o primeiro chamado).
+                # (Dependendo do GLPI, pode ter mais linhas de cabeçalho, talvez precise ser linhas[2])
+                primeiro_chamado = None
+                
+                # Procura a primeira linha que tenha dados (classe tab_bg_...)
+                for linha in linhas:
+                    if 'tab_bg_' in str(linha.get('class', [])):
+                        primeiro_chamado = linha
+                        break
+                
+                if primeiro_chamado:
+                    colunas = primeiro_chamado.find_all('td')
+                    # Pega a coluna da data
+                    if len(colunas) > INDICE_COLUNA_DATA:
+                        data_texto = colunas[INDICE_COLUNA_DATA].text.strip()
+                        print(f"    > Data encontrada na col {INDICE_COLUNA_DATA}: {data_texto}")
+                        
+                        tempo_texto, dias = calcular_tempo_aberto(data_texto)
+                        info['mais_antigo_tempo'] = tempo_texto
+                        info['mais_antigo_dias'] = dias
+                    else:
+                        print(f"    > Erro: Tabela tem menos colunas ({len(colunas)}) que o índice pedido ({INDICE_COLUNA_DATA}).")
 
-# --- Função Principal
+        return info
+
+    except Exception as e:
+        print(f"Erro ao analisar {nome_fila}: {e}")
+        return info
+
+# --- Bloco 4: Flask ---
+app = Flask(__name__)
+
+@app.route('/')
+def mostrar_status():
+    sessao = requests.Session()
+    dados = {}
+    msg = "Iniciando..."
+    erro = None
+
+    if fazer_login(sessao):
+        msg = "Login OK. Analisando filas..."
+        
+        dados['n1'] = analisar_fila(sessao, URL_N1, "N1")
+        dados['n2'] = analisar_fila(sessao, URL_N2, "N2")
+        dados['n3'] = analisar_fila(sessao, URL_N3, "N3")
+        
+        # Calcula total geral
+        dados['total_geral'] = dados['n1']['total'] + dados['n2']['total'] + dados['n3']['total']
+        
+        msg = "Análise completa!"
+    else:
+        msg = "Falha no Login"
+        erro = "Verifique credenciais."
+
+    contexto = {
+        'dados': dados,
+        'mensagem': msg,
+        'erro_msg': erro,
+        'agora': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    }
+    
+    return render_template('vigia.html', **contexto)
+
+def abrir_navegador():
+    webbrowser.open_new("http://127.0.0.1:5000/")
+
 if __name__ == "__main__":
-    print(f"--- Vigia do GLPI iniciando em {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} ---")
-    
-    sessao_http = requests.Session()
-
-    if fazer_login(sessao_http):
-        time.sleep(2)
-        total_chamados = buscar_dados_da_pagina(sessao_http)
-
-        if total_chamados is not None:
-            if total_chamados > 20:
-                print("\n[ALERTA!] O número de chamados ultrapassou o limite de 20!")
-                # Futuramente, aqui entrará a chamada para enviar_alerta_por_email(total_chamados)
-            else:
-                print(f"\n[Status OK] Total de chamados ({total_chamados}) dentro do limite.")
-    
-    print("--- Vigia finalizado ---")
+    # Timer(1.5, abrir_navegador).start()
+    app.run(host='127.0.0.1', port=5000, debug=True)
